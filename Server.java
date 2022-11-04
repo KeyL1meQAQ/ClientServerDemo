@@ -34,11 +34,11 @@ public class Server {
         public void run() {
             super.run();
 
-            printLog("Client connected", 0);
+            System.out.println("SERVER LOG: Client " + client + " connected.");
             Map<String, String> loginStatus = null;
 
-            ObjectOutputStream outputStream = null;
-            ObjectInputStream inputStream = null;
+            ObjectOutputStream outputStream;
+            ObjectInputStream inputStream;
             try {
                 outputStream = new ObjectOutputStream(connection.getOutputStream());
                 outputStream.flush();
@@ -49,26 +49,49 @@ public class Server {
                 if (loginStatus.get("status").equals("0")) {
                     while (true) {
                         Map<String, String> map = (Map<String, String>) inputStream.readObject();
+                        Map<String, String> info;
+                        System.out.println("SERVER LOG: Client " + client + " (" + map.get("username") + ") issued " +
+                                "Command " + map.get("command"));
+                        boolean leave = false;
                         switch (map.get("command")) {
                             case "UED":
-                                outputStream.writeObject(handleUED(map.get("username"), map.get("fileID"),
-                                        map.get("content")));
+                                info = handleUED(map.get("username"), map.get("fileID"), map.get("content"));
+                                outputStream.writeObject(info);
                                 outputStream.flush();
+                                System.out.println("SERVER LOG: Sent \"" + info.get("information") + "\" to Client "
+                                        + client + " (" + map.get("username") + ")");
                                 break;
                             case "SCS":
-                                outputStream.writeObject(handleSCS(map.get("username"), map.get("fileID"),
-                                        map.get("operation")));
+                                info = handleSCS(map.get("username"), map.get("fileID"), map.get("operation"));
+                                outputStream.writeObject(info);
                                 outputStream.flush();
+                                System.out.println("SERVER LOG: Sent \"" + info.get("information") + "\" to Client "
+                                        + client + " (" + map.get("username") + ")");
                                 break;
                             case "DTE":
-                                outputStream.writeObject(handleDTE(map.get("username"), map.get("fileID")));
+                                info = handleDTE(map.get("username"), map.get("fileID"));
+                                outputStream.writeObject(info);
                                 outputStream.flush();
+                                System.out.println("SERVER LOG: Sent \"" + info.get("information") + "\" to Client "
+                                        + client + " (" + map.get("username") + ")");
+                                break;
+                            case "AED":
+                                info = handleAED(map.get("username"));
+                                outputStream.writeObject(info);
+                                outputStream.flush();
+                                System.out.println("SERVER LOG: Sent \"" + info.get("information") + "\" to Client "
+                                        + client + " (" + map.get("username") + ")");
+                                break;
+                            case "OUT":
+                                leave = true;
                                 break;
                         }
+                        if (leave)
+                            break;
                     }
                 }
             } catch (EOFException | SocketException e) {
-                printLog("Client disconnected abnormally. Close the connection.", 0);
+                System.out.println("SERVER LOG: Client " + client + " disconnected abnormally. Close the connection.");
             } catch (ClassNotFoundException | IOException e) {
                 System.out.println("SERVER ERROR: " + e.getMessage());
             } finally {
@@ -78,22 +101,23 @@ public class Server {
                     // Close the connection
                     connection.close();
 
-                    printLog("Connection to client closed", 0);
+                    System.out.println("SERVER LOG: Connection to Client " + client + " closed");
 
                     // If we need to block the account for 10 seconds
                     if (status != null && status.equals("1")) {
                         blockedDevices.add(username);
-                        printLog("Account: " + username + " blocked", 0);
+                        System.out.println("SERVER LOG: Account " + username + " blocked");
                         Thread.sleep(10000);
 
                         blockedDevices.remove(username);
-                        printLog("Account: " + username + " unblocked", 0);
-                    }
+                        System.out.println("SERVER LOG: Account " + username + " unblocked");
+                    } else if (status != null && status.equals("0"))
+                        SynchronizedFileHandler.handleEdgeDeviceLog(1, username);
                 } catch (IOException e) {
-                    printLog("Failed to close connection to client", 0);
+                    System.out.println("SERVER ERROR: " + e.getMessage());
                 } catch (InterruptedException e) {
                     blockedDevices.remove(username);
-                    printLog("Failed to block Account: " + username, 0);
+                    System.out.println("SERVER ERROR: Failed to block Account: " + username);
                 }
             }
         }
@@ -128,9 +152,11 @@ public class Server {
                     info = Map.of("command", "LOGIN", "status", "102", "prompt", "Username: ");
                     outputStream.writeObject(info);
                     outputStream.flush();
+                    System.out.println("SERVER LOG: Prompt Client " + client + " for username");
 
                     Map<String, String> map = (Map<String, String>) inputStream.readObject();
                     String input = map.get("content");
+                    System.out.println("SERVER LOG: Received \"" + map.get("content") + "\" from Client " + client);
 
                     if (checkUsernamePassword(input, null))
                         username = input;
@@ -139,31 +165,38 @@ public class Server {
                                 "The username is invalid, please check your input username and try again");
                         outputStream.writeObject(info);
                         outputStream.flush();
+                        System.out.println("SERVER LOG: Sent \"" + info.get("information") + "\" to Client " + client);
                     }
                 } else {
+                    info = Map.of("command", "LOGIN", "status", "102", "prompt", "Password: ");
+                    outputStream.writeObject(info);
+                    outputStream.flush();
+                    System.out.println("SERVER LOG: Prompt Client " + client + " for password");
+
+                    Map<String, String> map = (Map<String, String>) inputStream.readObject();
+                    String input = map.get("content");
+                    System.out.println("SERVER LOG: Received \"" + map.get("content") + "\" from Client " + client);
+
                     if (blockedDevices.contains(username)) {
                         info = Map.of("command", "LOGIN", "status", "103", "information",
                                 "Your account is blocked due to multiple authentication failures. " +
                                         "Please try again later.");
                         outputStream.writeObject(info);
                         outputStream.flush();
-                        return Map.of("status", "2", "Username", username);
+                        System.out.println("SERVER LOG: Sent \"" + info.get("information") + "\" to Client " + client);
+                        return Map.of("status", "2", "username", username);
                     }
 
-                    info = Map.of("command", "LOGIN", "status", "102", "prompt", "Password: ");
-                    outputStream.writeObject(info);
-                    outputStream.flush();
-
-                    Map<String, String> map = (Map<String, String>) inputStream.readObject();
-                    String input = map.get("content");
                     if (checkUsernamePassword(username, input)) {
                         info = Map.of("command", "LOGIN", "status", "100", "information",
-                                username + ", you have successfully logged in. Welcome!");
+                                username + ", you have successfully logged in. Welcome!", "username", username);
                         outputStream.writeObject(info);
                         outputStream.flush();
+                        System.out.println("SERVER LOG: Sent \"" + info.get("information") + "\" to Client " + client);
 
                         map = (Map<String, String>) inputStream.readObject();
                         SynchronizedFileHandler.handleEdgeDeviceLog(0, username, clientIP, map.get("content"));
+                        System.out.println("SERVER LOG: Received \"" + map.get("content") + "\" from Client " + client);
                         return Map.of("status", "0", "username", username);
                     }
 
@@ -177,6 +210,7 @@ public class Server {
                                 "Wrong password, please try again!");
                     outputStream.writeObject(info);
                     outputStream.flush();
+                    System.out.println("SERVER LOG: Sent \"" + info.get("information") + "\" to Client " + client);
                 }
             }
             return Map.of("status", "1", "username", username == null ? "" : username);
@@ -253,10 +287,9 @@ public class Server {
                     case "SUM":
                         int sum = integers.stream().mapToInt(a -> a).sum();
                         return Map.of("command", "SCS", "status", "100", "information",
-                                "SUMSC of " + filename + ": " + sum);
+                                "SUM of " + filename + ": " + sum);
                 }
             } catch (FileNotFoundException e) {
-                e.printStackTrace();
                 return Map.of("command", "SCS", "status", "104", "information", "File: "
                         + filename + " not found on server");
             } catch (IOException e) {
@@ -274,7 +307,6 @@ public class Server {
 
                 LineNumberReader reader = new LineNumberReader(new FileReader(file));
                 while (reader.readLine() != null);
-                SynchronizedFileHandler.addUploadLog(username, fileID, String.valueOf(reader.getLineNumber()));
 
                 if (file.delete()) {
                     SynchronizedFileHandler.addDeleteLog(username, fileID, String.valueOf(reader.getLineNumber()));
@@ -284,36 +316,94 @@ public class Server {
                 } else
                     throw new IOException();
             } catch (FileNotFoundException e) {
-                e.printStackTrace();
                 return Map.of("command", "DTE", "status", "104", "information", "File: " +
                         filename + " not found on the server");
             } catch (IOException e) {
-                e.printStackTrace();
                 return Map.of("command", "DTE", "status", "101", "information", "File: " +
                         filename + " delete failed");
+            }
+        }
+
+        private Map<String, String> handleAED(String username) {
+            try {
+                String content = SynchronizedFileHandler.handleEdgeDeviceLog(2, username);
+                return Map.of("command", "AED", "status", "100", "content", content,
+                        "information", "Successfully found the list of active devices");
+            } catch (IOException e) {
+                return Map.of("command", "AED", "status", "101", "information",
+                        "Failed to get active edge devices.");
             }
         }
     }
 
     private static class SynchronizedFileHandler {
-        private static synchronized void handleEdgeDeviceLog(int mode, String... args) throws IOException {
+        private static synchronized String handleEdgeDeviceLog(int mode, String... args) throws IOException {
+            File file = new File("edge-device-log.txt");
             switch (mode) {
                 case 0:
-                    File file = new File("edge-device-log.txt");
-                    file.createNewFile(); // Create this log file if it is not existed
+                    try {
+                        file.createNewFile(); // Create this log file if it is not existed
 
-                    // Get the sequence number for current record
-                    LineNumberReader reader = new LineNumberReader(new FileReader(file));
-                    while (reader.readLine() != null);
-                    int seq = reader.getLineNumber() + 1;
-                    reader.close();
+                        // Get the sequence number for current record
+                        LineNumberReader reader = new LineNumberReader(new FileReader(file));
+                        while (reader.readLine() != null);
+                        int seq = reader.getLineNumber() + 1;
+                        reader.close();
 
-                    // Write the record to the end of the file
-                    FileWriter writer = new FileWriter(file, true);
-                    String content = join(String.valueOf(seq), getDateTime(), args[0], args[1], args[2]);
-                    writer.write(content);
-                    writer.close();
+                        // Write the record to the end of the file
+                        FileWriter writer = new FileWriter(file, true);
+                        String content = join(String.valueOf(seq), getDateTime(), args[0], args[1], args[2]);
+                        writer.write(content);
+                        writer.close();
+                        System.out.println("SERVER LOG: Added a record to edge-device-log.txt");
+                    } catch (IOException e) {
+                        throw new IOException("SERVER ERROR: Failed to add record to edge-device-log.txt");
+                    }
+                    break;
+                case 1:
+                    try {
+                        BufferedReader bufferedReader = new BufferedReader(new FileReader(file));
+                        List<String> content = new LinkedList<>();
+                        String line;
+                        while ((line = bufferedReader.readLine()) != null) {
+                            if (!line.split("; ")[2].equals(args[0]))
+                                content.add(line.substring(line.indexOf(' ') + 1));
+                        }
+                        bufferedReader.close();
+
+                        PrintWriter writer = new PrintWriter(file);
+                        int index = 1;
+                        for (String c: content) {
+                            writer.println(index + "; " + c);
+                            index++;
+                        }
+                        writer.close();
+                        System.out.println("SERVER LOG: Deleted a record from edge-device-log.txt");
+                    } catch (IOException e) {
+                        throw new IOException("SERVER ERROR: Failed to delete record from edge-device-log.txt");
+                    }
+                    break;
+                case 2:
+                    BufferedReader bufferedReader = new BufferedReader(new FileReader(file));
+                    StringBuilder result = new StringBuilder();
+                    String line;
+                    while ((line = bufferedReader.readLine()) != null) {
+                        String[] params = line.split("; ");
+                        if (!params[2].equals(args[0]))
+                            result.append("Username: ")
+                                    .append(params[2])
+                                    .append(", Active From: ")
+                                    .append(params[1])
+                                    .append(", IP Address: ")
+                                    .append(params[3])
+                                    .append(", UDP Port: ")
+                                    .append(params[4])
+                                    .append("\n");
+                    }
+                    bufferedReader.close();
+                    return result.toString().equals("") ? "No other active edge devices\n" : result.toString();
             }
+            return null;
         }
 
         private static synchronized void addUploadLog(String... args) throws IOException {
@@ -325,6 +415,7 @@ public class Server {
             String content = join(args[0], getDateTime(), args[1], args[2]);
             writer.write(content);
             writer.close();
+            System.out.println("SERVER LOG: Added a record to upload-log.txt");
         }
 
         private static synchronized void addDeleteLog(String... args) throws IOException {
@@ -336,6 +427,7 @@ public class Server {
             String content = join(args[0], getDateTime(), args[1], args[2]);
             writer.write(content);
             writer.close();
+            System.out.println("SERVER LOG: Added a record to deletion-log.txt");
         }
 
         private static String getDateTime() {
@@ -363,7 +455,7 @@ public class Server {
 
         try {
             SOCKET = new ServerSocket(PORT);
-            System.out.println("Server is running on port - " + PORT);
+            System.out.println("SERVER LOG: Server is running on port " + PORT);
 
             while (true) {
                 Socket connection = SOCKET.accept();
